@@ -105,6 +105,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	// Actor State //
 	/////////////////
 
+	private int batchDeficit = 0;
 	private long startTime;
 	private int firstJoinPartner = 0;
 	private int secJoinPartner = 1;
@@ -175,18 +176,21 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	}
 
 	private void sendBatch(ActorRef<DependencyWorker.Message> dependencyWorker) {
+		if(firstJoinPartner >= batches.size() || secJoinPartner >= batches.size()){
+			if(batchDeficit == 0)
+				this.end();
+			return;
+		}
 		BatchMessage batch1 = batches.get(firstJoinPartner);
 		BatchMessage batch2 = batches.get(secJoinPartner);
 		secJoinPartner++;
 		if(secJoinPartner >= batches.size()){
 			firstJoinPartner++;
 			secJoinPartner = firstJoinPartner+1;
-			if(firstJoinPartner >= batches.size() || secJoinPartner >= batches.size()){
-				this.getContext().getLog().info("Finished!");
-				this.end();
+			if(firstJoinPartner >= batches.size() || secJoinPartner >= batches.size())
 				return;
-			}
 		}
+		batchDeficit++;
 		this.getContext().getLog().info("Task with " + batch1.getId() + " " + batch2.getId());
 		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, batch1.getBatch(), batch2.getBatch(), batch1.getId(), batch2.getId()));
 	}
@@ -194,7 +198,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	private Behavior<Message> handle(CompletionMessage message) {
 		ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
 		// If this was a reasonable result, I would probably do something with it and potentially generate more work ... for now, let's just generate a random, binary IND.
-
+		batchDeficit--;
 		if (!message.getDependencies().isEmpty() && this.headerLines[0] != null) {
 			for (TableDependency dep : message.getDependencies()) {
 				this.getContext().getLog().info("Dependency found from " + this.inputFiles[dep.getTableID1()].getName() + " to " + this.inputFiles[dep.getTableID2()].getName());

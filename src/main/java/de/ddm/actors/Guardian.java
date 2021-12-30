@@ -14,7 +14,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class Guardian extends AbstractBehavior<Guardian.Message> {
@@ -52,7 +54,7 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 	////////////////////////
 
 	public static final String DEFAULT_NAME = "userGuardian";
-
+	public static final int WORKER_SIZE = 3;
 	public static final ServiceKey<Guardian.Message> guardianService = ServiceKey.create(Guardian.Message.class, DEFAULT_NAME + "Service");
 
 	public static Behavior<Message> create() {
@@ -67,7 +69,9 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 
 		this.reaper = context.spawn(Reaper.create(), Reaper.DEFAULT_NAME);
 		this.master = this.isMaster() ? context.spawn(Master.create(), Master.DEFAULT_NAME) : null;
-		this.worker = context.spawn(Worker.create(), Worker.DEFAULT_NAME);
+		for(int i = 0; i < WORKER_SIZE; i++){
+			this.workers.add(context.spawn(Worker.create(), Worker.DEFAULT_NAME+i));
+		}
 
 		context.getSystem().receptionist().tell(Receptionist.register(guardianService, context.getSelf()));
 
@@ -89,7 +93,7 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 
 	private final ActorRef<Reaper.Message> reaper;
 	private ActorRef<Master.Message> master;
-	private ActorRef<Worker.Message> worker;
+	private List<ActorRef<Worker.Message>> workers = new ArrayList<>();
 
 	////////////////////
 	// Actor Behavior //
@@ -131,9 +135,11 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 	}
 
 	private void shutdown() {
-		if (this.worker != null) {
-			this.worker.tell(new Worker.ShutdownMessage());
-			this.worker = null;
+		if (!this.workers.isEmpty()) {
+			for (ActorRef<Worker.Message> worker : workers) {
+				worker.tell(new Worker.ShutdownMessage());
+			}
+			workers.clear();
 		}
 		if (this.master != null) {
 			this.master.tell(new Master.ShutdownMessage());

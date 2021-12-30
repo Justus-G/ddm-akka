@@ -22,10 +22,6 @@ public class Main {
 				waitForInput(">>> Press ENTER to start <<<");
 
 			guardian.tell(new Guardian.StartMessage());
-
-			waitForInput(">>> Press ENTER to exit <<<");
-
-			guardian.tell(new Guardian.ShutdownMessage());
 		}
 	}
 
