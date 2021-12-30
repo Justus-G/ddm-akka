@@ -152,38 +152,47 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
 	private Behavior<Message> handle(BatchMessage message) {
 		this.getContext().getLog().info("Got Batch! " + message.getId());
-		// Ignoring batch content for now ... but I could do so much with it.
 
+		//Store the batches for later use
 		if (message.getBatch().size() != 0)
 			batches.add(message);
-			//this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
-			//.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
 		return this;
 	}
 
 	private Behavior<Message> handle(RegistrationMessage message) {
 		ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
 		if (!this.dependencyWorkers.contains(dependencyWorker)) {
-			this.getContext().getLog().info("Got Worker!");
+			this.getContext().getLog().info("Registered Worker!");
 			this.dependencyWorkers.add(dependencyWorker);
 			this.getContext().watch(dependencyWorker);
-			// The worker should get some work ... let me send her something before I figure out what I actually want from her.
-			// I probably need to idle the worker for a while, if I do not have work for it right now ... (see master/worker pattern)
-
+			// after the worker is registered he can start working for us until he or the problem is finished :)
 			sendBatch(dependencyWorker);
 		}
 		return this;
 	}
 
+	/**
+	 * This method keeps track, which table is computed with which table.
+	 * We use two int values to represent the combinations and increment the last of them until it reached the end than we increase the first int and repeat.
+	 * e.g Tables: 1,2,3,4,5
+	 * Combination compute order: (1,2);(1,3);(1,4);(1,5);(2,3);(2,4);(2,5);(3,4);(4,5)
+	 * Also we need to wait until all worker finish. For this we use a deficit counter, which counts how many batches we started to compute.
+	 * It increases in the start and decreases when we finish a computation.
+	 * @param dependencyWorker
+	 */
 	private void sendBatch(ActorRef<DependencyWorker.Message> dependencyWorker) {
+		//If nothing is left to compute we return
 		if(firstJoinPartner >= batches.size() || secJoinPartner >= batches.size()){
+			// Check if it was the last batch, then we can end our computation
 			if(batchDeficit == 0)
 				this.end();
 			return;
 		}
 		BatchMessage batch1 = batches.get(firstJoinPartner);
 		BatchMessage batch2 = batches.get(secJoinPartner);
+		//increase second int
 		secJoinPartner++;
+		//if second int is already max, we increase first int and set the second to the first+1
 		if(secJoinPartner >= batches.size()){
 			firstJoinPartner++;
 			secJoinPartner = firstJoinPartner+1;
@@ -191,13 +200,14 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 				return;
 		}
 		batchDeficit++;
-		this.getContext().getLog().info("Task with " + batch1.getId() + " " + batch2.getId());
+		this.getContext().getLog().info("Start working on task with " + batch1.getId() + " " + batch2.getId());
+		//Send working batch to dependency worker, ids are needed for later
 		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, batch1.getBatch(), batch2.getBatch(), batch1.getId(), batch2.getId()));
 	}
 
 	private Behavior<Message> handle(CompletionMessage message) {
 		ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
-		// If this was a reasonable result, I would probably do something with it and potentially generate more work ... for now, let's just generate a random, binary IND.
+
 		batchDeficit--;
 		if (!message.getDependencies().isEmpty() && this.headerLines[0] != null) {
 			for (TableDependency dep : message.getDependencies()) {
@@ -216,12 +226,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 				this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
 			}
 		}
-		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
-		// Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
 
+		//Worker can try to start solving again if there are any more batches left
 		sendBatch(dependencyWorker);
 
-		// At some point, I am done with the discovery. That is when I should call my end method. Because I do not work on a completable task yet, I simply call it after some time.
 		if(isFinished())
 			this.end();
 		return this;

@@ -98,11 +98,18 @@ public class InputReader extends AbstractBehavior<InputReader.Message> {
 				break;
 			batch.add(line);
 		}
+		//return the table, after its transformed to fit the column store type.
 		List<List<String>> transposedBatch = transposeBatch(batch);
 		message.getReplyTo().tell(new DependencyMiner.BatchMessage(this.id, transposedBatch));
 		return this;
 	}
 
+	/**
+	 * We transpose the current Table, because it stores rows, which makes it quite hard to compute the INDs.
+	 * With the transpose we go from storing rows to columns.
+	 * @param batch
+	 * @return
+	 */
 	private List<List<String>> transposeBatch(List<String[]> batch) {
 		List<List<String>> ret = new ArrayList<>();
 		final int N = batch.get(0).length;
