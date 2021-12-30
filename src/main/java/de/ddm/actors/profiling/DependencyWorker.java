@@ -7,14 +7,15 @@ import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
 import akka.actor.typed.javadsl.Receive;
 import akka.actor.typed.receptionist.Receptionist;
+import akka.japi.Pair;
 import de.ddm.actors.patterns.LargeMessageProxy;
 import de.ddm.serialization.AkkaSerializable;
+import de.ddm.structures.TableDependency;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message> {
 
@@ -39,7 +40,10 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	public static class TaskMessage implements Message {
 		private static final long serialVersionUID = -4667745204456518160L;
 		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
-		int task;
+		List<List<String>> batchFirst;
+		List<List<String>> batchSec;
+		int table1ID;
+		int table2ID;
 	}
 
 	////////////////////////
@@ -90,16 +94,27 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 		this.getContext().getLog().info("Working!");
 		// I should probably know how to solve this task, but for now I just pretend some work...
 
-		int result = message.getTask();
-		long time = System.currentTimeMillis();
-		Random rand = new Random();
-		int runtime = (rand.nextInt(2) + 2) * 1000;
-		while (System.currentTimeMillis() - time < runtime)
-			result = ((int) Math.abs(Math.sqrt(result)) * result) % 1334525;
+		List<List<String>> batch1 = message.getBatchFirst();
+		List<List<String>> batch2 = message.getBatchSec();
 
-		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result);
+		int x = 0;
+		int y = 0;
+		List<TableDependency> dependencies = new ArrayList<>();
+		for (List<String> col : batch1){
+			y = 0;
+			for (List<String> col2: batch2){
+				if(col.containsAll(col2)){
+					dependencies.add(new TableDependency(message.getTable2ID(), message.getTable1ID(), y, x));
+				} else if(col2.containsAll(col)){
+					dependencies.add(new TableDependency(message.getTable1ID(), message.getTable2ID(), x, y));
+				}
+				y++;
+			}
+			x++;
+		}
+
+		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), dependencies);
 		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
-
 		return this;
 	}
 }

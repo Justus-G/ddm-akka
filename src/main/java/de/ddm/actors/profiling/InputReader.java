@@ -98,9 +98,23 @@ public class InputReader extends AbstractBehavior<InputReader.Message> {
 				break;
 			batch.add(line);
 		}
-
-		message.getReplyTo().tell(new DependencyMiner.BatchMessage(this.id, batch));
+		List<List<String>> transposedBatch = transposeBatch(batch);
+		message.getReplyTo().tell(new DependencyMiner.BatchMessage(this.id, transposedBatch));
 		return this;
+	}
+
+	private List<List<String>> transposeBatch(List<String[]> batch) {
+		List<List<String>> ret = new ArrayList<>();
+		final int N = batch.get(0).length;
+		for (int i = 0; i < N; i++) {
+			List<String> col = new ArrayList<>();
+			for (String[] row : batch) {
+				col.add(row[i]);
+			}
+			col.remove(0);
+			ret.add(col);
+		}
+		return ret;
 	}
 
 	private Behavior<Message> handle(PostStop signal) throws IOException {
