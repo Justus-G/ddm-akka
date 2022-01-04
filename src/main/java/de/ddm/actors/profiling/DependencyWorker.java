@@ -16,6 +16,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message> {
 
@@ -32,6 +33,14 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	public static class ReceptionistListingMessage implements Message {
 		private static final long serialVersionUID = -5246338806092216222L;
 		Receptionist.Listing listing;
+	}
+
+	@Getter
+	@NoArgsConstructor
+	@AllArgsConstructor
+	public static class IdleMessage implements Message {
+		private static final long serialVersionUID = -5246338806092216222L;
+		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
 	}
 
 	@Getter
@@ -80,7 +89,21 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 		return newReceiveBuilder()
 				.onMessage(ReceptionistListingMessage.class, this::handle)
 				.onMessage(TaskMessage.class, this::handle)
+				.onMessage(IdleMessage.class, this::handle)
 				.build();
+	}
+
+	// we should improve it, but it will work for now
+	private Behavior<Message> handle(IdleMessage message) {
+		this.getContext().getLog().info("Idling!");
+		try {
+			TimeUnit.SECONDS.sleep(1);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), new ArrayList<>());
+		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
+		return this;
 	}
 
 	private Behavior<Message> handle(ReceptionistListingMessage message) {
@@ -112,7 +135,6 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 			}
 			x++;
 		}
-
 		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), dependencies);
 		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
 		return this;

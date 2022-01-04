@@ -21,6 +21,7 @@ import lombok.NoArgsConstructor;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
@@ -108,7 +109,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	private int batchDeficit = 0;
 	private long startTime;
 	private int firstJoinPartner = 0;
-	private int secJoinPartner = 1;
+	private int secJoinPartner = 0;
 	private List<BatchMessage> batches;
 	private final boolean discoverNaryDependencies;
 	private final File[] inputFiles;
@@ -139,8 +140,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	private Behavior<Message> handle(StartMessage message) {
 		for (ActorRef<InputReader.Message> inputReader : this.inputReaders)
 			inputReader.tell(new InputReader.ReadHeaderMessage(this.getContext().getSelf()));
-		for (ActorRef<InputReader.Message> inputReader : this.inputReaders)
+		for (ActorRef<InputReader.Message> inputReader : this.inputReaders){
 			inputReader.tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
+		}
 		this.startTime = System.currentTimeMillis();
 		return this;
 	}
@@ -156,6 +158,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		//Store the batches for later use
 		if (message.getBatch().size() != 0)
 			batches.add(message);
+
 		return this;
 	}
 
@@ -181,33 +184,33 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	 * @param dependencyWorker
 	 */
 	private void sendBatch(ActorRef<DependencyWorker.Message> dependencyWorker) {
-		//If nothing is left to compute we return
-		if(firstJoinPartner >= batches.size() || secJoinPartner >= batches.size()){
-			// Check if it was the last batch, then we can end our computation
-			if(batchDeficit == 0)
-				this.end();
+		if(batches.size() != inputReaders.size()){ //some batches are still missing, we wait for them and let the worker idle a bit
+			batchDeficit++;
+			dependencyWorker.tell(new DependencyWorker.IdleMessage(this.largeMessageProxy));
+		} else if(firstJoinPartner >= inputReaders.size() && batchDeficit != 0) { //No batches left to do for us, but some other worker is still working
 			return;
+		}else if(isFinished()){// last batch is finished we can terminate
+			this.end();
+		} else {
+			BatchMessage batch1 = batches.get(firstJoinPartner);
+			BatchMessage batch2 = batches.get(secJoinPartner);
+				//increase second int
+			secJoinPartner++;
+				//if second int is already max, we increase first int and set the second to the first+1
+			if (secJoinPartner >= batches.size()) {
+				firstJoinPartner++;
+				secJoinPartner = firstJoinPartner;
+			}
+			batchDeficit++;
+			this.getContext().getLog().info("Start working on task with " + batch1.getId() + " " + batch2.getId() + " Def: " + batchDeficit);
+
+				//Send working batch to dependency worker, ids are needed for later
+			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, batch1.getBatch(), batch2.getBatch(), batch1.getId(), batch2.getId()));
 		}
-		BatchMessage batch1 = batches.get(firstJoinPartner);
-		BatchMessage batch2 = batches.get(secJoinPartner);
-		//increase second int
-		secJoinPartner++;
-		//if second int is already max, we increase first int and set the second to the first+1
-		if(secJoinPartner >= batches.size()){
-			firstJoinPartner++;
-			secJoinPartner = firstJoinPartner+1;
-			if(firstJoinPartner >= batches.size() || secJoinPartner >= batches.size())
-				return;
-		}
-		batchDeficit++;
-		this.getContext().getLog().info("Start working on task with " + batch1.getId() + " " + batch2.getId());
-		//Send working batch to dependency worker, ids are needed for later
-		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, batch1.getBatch(), batch2.getBatch(), batch1.getId(), batch2.getId()));
 	}
 
 	private Behavior<Message> handle(CompletionMessage message) {
 		ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
-
 		batchDeficit--;
 		if (!message.getDependencies().isEmpty() && this.headerLines[0] != null) {
 			for (TableDependency dep : message.getDependencies()) {
@@ -236,7 +239,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	}
 
 	private boolean isFinished() {
-		return firstJoinPartner-1 >= batches.size();
+		return firstJoinPartner >= inputReaders.size() && batchDeficit == 0;
 	}
 
 	private void end() {

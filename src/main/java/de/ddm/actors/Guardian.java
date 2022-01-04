@@ -70,7 +70,7 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 
 		this.reaper = context.spawn(Reaper.create(), Reaper.DEFAULT_NAME);
 		this.master = this.isMaster() ? context.spawn(Master.create(), Master.DEFAULT_NAME) : null;
-		//create as many workers as intended 
+		//create as many workers as intended
 		for(int i = 0; i < WORKER_SIZE; i++){
 			this.workers.add(context.spawn(Worker.create(), Worker.DEFAULT_NAME+i));
 		}
